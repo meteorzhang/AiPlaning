@@ -1,41 +1,15 @@
-# Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#  * Redistributions of source code must retain the above copyright
-#    notice, this list of conditions and the following disclaimer.
-#  * Redistributions in binary form must reproduce the above copyright
-#    notice, this list of conditions and the following disclaimer in the
-#    documentation and/or other materials provided with the distribution.
-#  * Neither the name of NVIDIA CORPORATION nor the names of its
-#    contributors may be used to endorse or promote products derived
-#    from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
-# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-# PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
-# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 from multiprocessing import Queue
 import sys
 #sys.path.append('../')
 
-from virtual.navi.GoConfig import GoConfig
-from virtual.navi.ThreadPredictor import ThreadPredictor
+from GoConfig import GoConfig
+from ThreadPredictor import ThreadPredictor
 #from threading import Thread
-from virtual.navi.GoProcessAgent import GoProcessAgent
-from virtual.navi.GoNetwork import GoNetwork
-from virtual.navi.GoAgentAction import GoAgentAction
-from virtual.navi.GoSharedStatus import GoSharedStatus
-from virtual.navi.route_planning import Route_planning
+from GoProcessAgent import GoProcessAgent
+from GoNetwork import GoNetwork
+from GoAgentAction import GoAgentAction
+from GoSharedStatus import GoSharedStatus
+from route_planning import Route_planning
 from PyQt5.QtCore import *
 import numpy as np
 import time
@@ -67,11 +41,11 @@ class Navigator1(object):
         if GoConfig.LOAD_CHECKPOINT:
             self.model.load()
 
-        self.map_path = "11_13/init_road.png"
+
 
 
         # Build the directed road network from the road network file
-        self.route_palnning = Route_planning(path)
+        #self.route_palnning = Route_planning(path)
 
         self.predictors = []
         for i in range(8):
@@ -84,17 +58,11 @@ class Navigator1(object):
         #     agent.run_agent()
         return self.agents[0].share_env.get_all_state()
 
-    def init_map_m(self, m):
-        self.map_m = m
 
     def init_data(self, map_path, car_list):
         self._init_road_network(map_path)
         self.agvs = car_list
-
-
-
         self.update_agents(self.agvs)  # 更新carlist ,启动每个线程
-        # self.share.init_map()  # 共享位姿？
 
     def delete(self):  # 销毁预测线程
         for i in range(10):
@@ -172,15 +140,13 @@ class Navigator1(object):
         return road_node_Nos, road_node_info, road_lines, road_directions, road_lines_num, node_edges
     # 添加新的agent
     def add_agent(self, a):  # 为每个agent创建
-        agent = GoProcessAgent(a.get_id(), self.share, self.actions, self.prediction_q, self.route_palnning)
+        agent = GoProcessAgent(a[0], self.share, self.actions, self.prediction_q)
 
-        print("navi: ", a.get_id(), a.x, a.y)
 
-        agent.init_data(a.get_id(), a.x, a.y, a.x, a.y)
+        agent.init_data(a[0], a.x, a.y, a.x, a.y)
 
-        print("key: ", type(a.get_id()))
 
-        self.agents[a.get_id()] = agent
+        self.agents[a[0]] = agent
 
     def set_goal(self, agv_id,stationcode,x,y,goal_x,goal_y):
 
