@@ -37,10 +37,11 @@ from GoConfig import GoConfig
 from Experience import Experience
 from GoEnvironment import GoEnvironment
 import copy
-
+from GoStatus import AgentState
+import networkx as nx
 
 class GoProcessAgent(Process):
-    def __init__(self, id, shared_env, actions, prediction_q, training_q, episode_log_q, enable_show, episode_count):
+    def __init__(self, id, shared_env, actions, prediction_q, training_q, episode_log_q, enable_show, episode_count,road_node_Nos, road_node_info, road_lines,road_directions, road_lines_num, node_edges):
         super(GoProcessAgent, self).__init__()
 
         self.id = str(id)
@@ -64,7 +65,43 @@ class GoProcessAgent(Process):
         self.epsilon_end = 0.9  # 0.9
         self.flag = False
         self.parking_time = 0
+        self.G = nx.DiGraph()
+        self.road_node_Nos = road_node_Nos
+        self.road_node_info = road_node_info
+        self.road_lines = road_lines
+        self.road_directions=road_directions
+        self.road_lines_num = road_lines_num
+        self.node_edges = node_edges
 
+
+
+    def init_data(self, id, x, y, goal_x, goal_y):
+        # print("x: ", x, " y:", y)
+        self.__id = id
+        # self.x, self.y = self.__world_coordinate(x, y)
+        # self.goal_x, self.goal_y = self.__world_coordinate(goal_x, goal_y)
+        # add
+        self._start_x = x
+        self._start_y = y
+
+        self._goal_x = goal_x
+        self._goal_y = goal_y
+
+        self.v_mean = np.array([1e-5, 1e-5, 1e-5])
+
+        self.shortest_path_action = [1, 0.1, 0.1, 0.1, 0.1]
+
+        self.shortest_path_length = 0
+
+        self.state = 0
+
+
+
+        curr_status = AgentState(self._start_x, self._start_y, 0, 0, self._goal_x, self._goal_y, self.radius,
+                            np.mean(self.v_mean), self.shortest_path_action, self.shortest_path_length, self.__id, 0)
+
+        self.share_env.update_agent_status(curr_status)  # 共享位姿
+        print("初始化时，共享数据时间：", time.time()-s)
     @staticmethod
     def _accumulate_rewards(experiences, discount_factor, terminal_reward):
         reward_sum = terminal_reward
@@ -88,6 +125,42 @@ class GoProcessAgent(Process):
         p, v = self.wait_q.get()
         return p, v
 
+    def set_goal_xy(self,x, y, goal_x, goal_y):
+        self._robot_px = x
+        self._robot_py = y
+        self._global_goal_px = goal_x
+        self._global_goal_py = goal_y
+        s
+        self.has_path = False
+        self.simple_paths, self.has_path = self.search_paths_agent_to_goal(self._robot_px, self._robot_py,
+                                                                               self._global_goal_px,
+                                                                               self._global_goal_py, self.G,
+                                                                               self.road_node_Nos,
+                                                                               self.road_node_info, self.road_lines,
+                                                                               self.road_directions,
+                                                                               self.road_lines_num, self.node_edges)
+
+        if len(self.simple_paths) == 0:
+            print("no path")
+
+        # 提取路径上节点的坐标
+        self.shortest_path_coordinate.clear()
+        self.shortest_path_coordinate.append([self._robot_px, self._robot_py])
+
+        self.v_mean = np.array([0.5, 0.5, 0.5])
+        self._last_local_goal_px = self._robot_px
+        self._last_local_goal_py = self._robot_py
+        self._next_local_goal_px = self._robot_px
+        self._next_local_goal_py = self._robot_py
+        self._env_done = 0
+        self._deadlock = False
+
+        status = AgentState(self._robot_px, self._robot_py, self._robot_vx, self._robot_vy, self._last_local_goal_px,
+                            self._last_local_goal_py, self._next_local_goal_px, self._next_local_goal_py,
+                            self._global_goal_px, self._global_goal_py, self.radius, np.mean(self.v_mean),
+                            self.simple_paths, self.shortest_path_coordinate, self._env_done, self.id)
+
+        self.share_env.update_agent_status(status)
     def select_action(self, prediction):
         if GoConfig.PLAY_MODE:
             action = np.argmax(prediction)
@@ -362,3 +435,225 @@ class GoProcessAgent(Process):
             #     self.epsilon = 1
 
             self.episode_log_q.put((datetime.now(), total_reward, total_length))
+
+    def search_paths_agent_to_goal(self, robot_x, robot_y, goal_x, goal_y, G, road_node_Nos, road_node_info,
+                                   road_lines, road_directions, road_lines_num, node_edges):
+        """
+        Generate all simple paths in the graph G from source to target, starting from shortest ones.
+        Return True if G has a path from agent to goal.
+        """
+        # add target node
+        target_node_coordinate = np.zeros((1, 2))
+        target_node_coordinate[0][0] = goal_x
+        target_node_coordinate[0][1] = goal_y
+        target_node = None
+
+        for (key, value) in road_node_info.items():
+            if math.sqrt((value[0]-target_node_coordinate[0][0])**2 + (value[1]-target_node_coordinate[0][1])**2) <= 0.01:
+                target_node = key
+
+        if target_node == 0:
+            print(target_node)
+            raise Exception("wrong target node", target_node)
+
+        # Check whether the robot is on the road node or not
+        at_node = False
+        for (key, value) in road_node_info.items():
+            if key == 0:
+                continue
+            if value[0] == robot_x and value[1] == robot_y:
+                at_node = True
+                agent_node_No = key
+
+        if at_node == False:
+            # add agent node
+            agent_node_No = 0
+            agent_node_coordinate = np.zeros((1, 2))
+            agent_node_coordinate[0][0] = robot_x
+            agent_node_coordinate[0][1] = robot_y
+            agent_node = dict(zip([agent_node_No], agent_node_coordinate))
+            road_node_info.update(agent_node)
+
+            # add node
+            env_node_Nos = [agent_node_No] + road_node_Nos
+            G.add_nodes_from(env_node_Nos)
+
+            # add edges from agent to the nearest road line
+            # calculate the distance from the agent to the lines
+            agent_line_dist = []
+            for i in range(road_lines_num):
+                cross = (road_lines[i][2] - road_lines[i][0]) * (agent_node_coordinate[0][0] - road_lines[i][0]) \
+                        + (road_lines[i][3] - road_lines[i][1]) * (agent_node_coordinate[0][1] - road_lines[i][1])
+                if cross <= 0:
+                    agent_line_dist.append(np.sqrt((agent_node_coordinate[0][0] - road_lines[i][0]) ** 2
+                                                   + (agent_node_coordinate[0][1] - road_lines[i][1]) ** 2))
+                    continue
+
+                d2 = (road_lines[i][2] - road_lines[i][0]) ** 2 + (road_lines[i][3] - road_lines[i][1]) ** 2
+                if cross >= d2:
+                    agent_line_dist.append(np.sqrt((agent_node_coordinate[0][0] - road_lines[i][2]) ** 2
+                                                   + (agent_node_coordinate[0][1] - road_lines[i][3]) ** 2))
+                    continue
+                r = cross / d2
+                p0 = road_lines[i][0] + (road_lines[i][2] - road_lines[i][0]) * r
+                p1 = road_lines[i][1] + (road_lines[i][3] - road_lines[i][1]) * r
+                agent_line_dist.append(
+                    np.sqrt((agent_node_coordinate[0][0] - p0) ** 2 + (agent_node_coordinate[0][1] - p1) ** 2))
+
+            # find the nearest line index
+            agent_line_dist_shortest = float("inf")
+            agent_line_shortest_index = 0
+
+            for index, item in enumerate(agent_line_dist):
+                if item < agent_line_dist_shortest:
+                    agent_line_shortest_index = index
+                    agent_line_dist_shortest = item
+
+            # find the shortest line's node
+            agent_line_shortest_node0 = None
+            agent_line_shortest_node1 = None
+
+            for (key, value) in road_node_info.items():
+                if value[0] == road_lines[agent_line_shortest_index][0] and value[1] == \
+                        road_lines[agent_line_shortest_index][1]:
+                    agent_line_shortest_node0 = key
+                if value[0] == road_lines[agent_line_shortest_index][2] and value[1] == \
+                        road_lines[agent_line_shortest_index][3]:
+                    agent_line_shortest_node1 = key
+
+            # add new edges from the agent node to road note
+            if road_directions[agent_line_shortest_index] == 0:
+                node_edges.append([agent_node_No, agent_line_shortest_node1, {'len': np.sqrt(
+                    (road_node_info[agent_line_shortest_node1][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                road_node_info[agent_line_shortest_node1][1] - agent_node_coordinate[0][1]) ** 2)}])
+            elif road_directions[agent_line_shortest_index] == 1:
+                node_edges.append([agent_node_No, agent_line_shortest_node0, {'len': np.sqrt(
+                    (road_node_info[agent_line_shortest_node0][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                road_node_info[agent_line_shortest_node0][1] - agent_node_coordinate[0][1]) ** 2)}])
+            elif road_directions[agent_line_shortest_index] == 2:
+                node_edges.append([agent_node_No, agent_line_shortest_node0, {'len': np.sqrt(
+                    (road_node_info[agent_line_shortest_node0][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                road_node_info[agent_line_shortest_node0][1] - agent_node_coordinate[0][1]) ** 2)}])
+                node_edges.append([agent_node_No, agent_line_shortest_node1, {'len': np.sqrt(
+                    (road_node_info[agent_line_shortest_node1][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                road_node_info[agent_line_shortest_node1][1] - agent_node_coordinate[0][1]) ** 2)}])
+            else:
+                raise ValueError('wrong direction')
+
+            G.add_edges_from(node_edges)
+            simple_paths_list = list()
+            if agent_node_No not in G or target_node not in G:
+                has_path = False
+                G.clear()
+            else:
+                if nx.has_path(G, source=agent_node_No, target=target_node):
+                    simple_paths = nx.shortest_simple_paths(G, source=agent_node_No, target=target_node, weight='len')
+
+                    for path in simple_paths:
+                        simple_paths_list.append(path)
+
+                    for path in simple_paths_list:
+                        if path[1] == agent_line_shortest_node1:
+                            path[0] = agent_line_shortest_node0
+                        elif path[1] == agent_line_shortest_node0:
+                            path[0] = agent_line_shortest_node1
+                        else:
+                            raise ValueError('First node Error!')
+
+                    remove_paths_list = list()
+                    for path in simple_paths_list:
+                        for path_rest in simple_paths_list[simple_paths_list.index(path) + 1:]:
+                            if path == path_rest[- len(path):]:
+                                remove_paths_list.append(path_rest)
+
+                    for remove_path in remove_paths_list:
+                        if remove_path in simple_paths_list:
+                            simple_paths_list.remove(remove_path)
+
+                    # Choose 1 simple paths
+                    if len(simple_paths_list) > 1:
+                        simple_paths_list = simple_paths_list[0:1]
+
+                    # remove edges from the agent node to road note
+                    if road_directions[agent_line_shortest_index] == 0:
+                        node_edges.remove([agent_node_No, agent_line_shortest_node1, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node1][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node1][1] - agent_node_coordinate[0][1]) ** 2)}])
+                    elif road_directions[agent_line_shortest_index] == 1:
+                        node_edges.remove([agent_node_No, agent_line_shortest_node0, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node0][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node0][1] - agent_node_coordinate[0][1]) ** 2)}])
+                    elif road_directions[agent_line_shortest_index] == 2:
+                        node_edges.remove([agent_node_No, agent_line_shortest_node0, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node0][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node0][1] - agent_node_coordinate[0][1]) ** 2)}])
+                        node_edges.remove([agent_node_No, agent_line_shortest_node1, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node1][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node1][1] - agent_node_coordinate[0][1]) ** 2)}])
+                    else:
+                        raise ValueError('wrong direction')
+
+                    has_path = True
+                    G.clear()
+                else:
+                    # remove edges from the agent node to road note
+                    if road_directions[agent_line_shortest_index] == 0:
+                        node_edges.remove([agent_node_No, agent_line_shortest_node1, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node1][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node1][1] - agent_node_coordinate[0][1]) ** 2)}])
+                    elif road_directions[agent_line_shortest_index] == 1:
+                        node_edges.remove([agent_node_No, agent_line_shortest_node0, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node0][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node0][1] - agent_node_coordinate[0][1]) ** 2)}])
+                    elif road_directions[agent_line_shortest_index] == 2:
+                        node_edges.remove([agent_node_No, agent_line_shortest_node0, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node0][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node0][1] - agent_node_coordinate[0][1]) ** 2)}])
+                        node_edges.remove([agent_node_No, agent_line_shortest_node1, {'len': np.sqrt(
+                            (road_node_info[agent_line_shortest_node1][0] - agent_node_coordinate[0][0]) ** 2 + (
+                                        road_node_info[agent_line_shortest_node1][1] - agent_node_coordinate[0][1]) ** 2)}])
+                    else:
+                        raise ValueError('wrong direction')
+
+                    has_path = False
+                    G.clear()
+        else:
+            G.add_edges_from(node_edges)
+            simple_paths_list = list()
+            # 判断站点是否在路网上
+            if agent_node_No not in G or target_node not in G:
+                has_path = False
+                G.clear()
+            else:
+                # 判断站点和目标间是否存在路径
+                if nx.has_path(G, source=agent_node_No, target=target_node):
+                    # 提取所有简单路径
+                    simple_paths = nx.shortest_simple_paths(G, source=agent_node_No, target=target_node, weight='len')
+
+                    for path in simple_paths:
+                        simple_paths_list.append(path)
+
+                    # 移除带有回环的路网
+                    remove_paths_list = list()
+                    for path in simple_paths_list:
+                        for path_rest in simple_paths_list[simple_paths_list.index(path) + 1:]:
+                            if path == path_rest[- len(path):]:
+                                remove_paths_list.append(path_rest)
+
+                    for remove_path in remove_paths_list:
+                        if remove_path in simple_paths_list:
+                            simple_paths_list.remove(remove_path)
+
+                    # 提取最多2条路径
+                    if len(simple_paths_list) > 2:
+                        simple_paths_list = simple_paths_list[0:2]
+
+                    # 确认存在路径
+                    has_path = True
+                    G.clear()
+                else:
+                    # 不存在路径
+                    has_path = False
+                    G.clear()
+
+        return simple_paths_list, has_path

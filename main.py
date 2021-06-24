@@ -39,5 +39,5 @@ class Navi_thread(Thread):
         self.map_name = map_name
 
     def run(self):
-
+        self.navigation.init()
         self.navigation.init_data(self.map_name, self.car_list)

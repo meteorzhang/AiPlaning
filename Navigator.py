@@ -9,7 +9,6 @@ from GoProcessAgent import GoProcessAgent
 from GoNetwork import GoNetwork
 from GoAgentAction import GoAgentAction
 from GoSharedStatus import GoSharedStatus
-from route_planning import Route_planning
 from PyQt5.QtCore import *
 import numpy as np
 import time
@@ -23,12 +22,11 @@ class Navigator1(object):
         #     self.stats.episode_count.value = self.model.load()
         # self.model = None
 
-    def init(self, path):
+    def init(self):
         self.map_m = None
         self.agents = dict()  # AGENT字典
         self.isready = False  # indicate the Network loaded or didn't
 
-        # self.map_path = "/home/brook/NaviPlanningEmulatorGrid/test/custom_map/11_13/init_road.png"
 
         self.share = GoSharedStatus()
 
@@ -72,11 +70,7 @@ class Navigator1(object):
         self.map_path = map_url
         pass
 
-    def update_agents(self, car_list):
-        # print("update_agents!!!")
-        for x in car_list:
-            self.add_agent(x)
-        self.start_all_agent()  # 开始所有agent线程
+
 
     def _init_road_network(self, road_config_file):
         # 读取路径文件
@@ -138,9 +132,20 @@ class Navigator1(object):
         road_lines_num = roads_num
 
         return road_node_Nos, road_node_info, road_lines, road_directions, road_lines_num, node_edges
+
+    def update_agents(self, car_list):
+        # print("update_agents!!!")
+        self.road_node_Nos, self.road_node_info, self.road_lines, self.road_directions,self.road_lines_num, self.node_edges = self._init_road_network(
+            self.share.road_url)
+        for x in car_list:
+            self.add_agent(x,self.road_node_Nos, self.road_node_info, self.road_lines, self.road_directions,self.road_lines_num, self.node_edges)
+        self.start_all_agent()  # 开始所有agent线程
+
     # 添加新的agent
-    def add_agent(self, a):  # 为每个agent创建
-        agent = GoProcessAgent(a[0], self.share, self.actions, self.prediction_q)
+    def add_agent(self, a,road_node_Nos, road_node_info, road_lines, road_lines_num, node_edges):  # 为每个agent创建
+
+
+        agent = GoProcessAgent(a[0], self.share, self.actions, self.prediction_q,road_node_Nos, road_node_info, road_lines, road_lines_num, node_edges)
 
 
         agent.init_data(a[0], a.x, a.y, a.x, a.y)

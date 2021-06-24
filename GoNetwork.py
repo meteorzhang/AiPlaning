@@ -33,7 +33,7 @@ from tensorflow.contrib.slim import nets
 import tensorflow.contrib.slim as slim
 import tensorflow.contrib.rnn as rnn
 
-from go_ga3c.GoConfig import GoConfig
+from GoConfig import GoConfig
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 '''
